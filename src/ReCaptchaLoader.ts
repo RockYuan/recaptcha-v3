@@ -12,35 +12,56 @@ class ReCaptchaLoader {
    * Loads the recaptcha library with the given site key.
    *
    * @param siteKey The site key to load the library with.
+   * @param options The options for the loader
    * @return The recaptcha wrapper.
    */
-  public static load(siteKey: string): Promise<ReCaptchaInstance> {
+  public static load(siteKey: string, options: IReCaptchaLoaderOptions = {}): Promise<ReCaptchaInstance> {
     // Browser environment
     if (typeof document === 'undefined')
-      throw new Error('This is a library for the browser!')
+      return Promise.reject(new Error('This is a library for the browser!'))
 
     // Check if grecaptcha is already registered.
     if (ReCaptchaLoader.getLoadingState() === ELoadingState.LOADED)
-      return Promise.resolve(new ReCaptchaInstance(siteKey, grecaptcha))
+    // Check if the site key is equal to the already loaded instance
+      if (ReCaptchaLoader.instance.getSiteKey() === siteKey)
+      // Resolve existing instance
+        return Promise.resolve(ReCaptchaLoader.instance)
+      else
+      // Reject because site keys are different
+        return Promise.reject(new Error('reCAPTCHA already loaded with different site key!'))
 
     // If the recaptcha is loading add this loader to the queue.
-    if (ReCaptchaLoader.getLoadingState() === ELoadingState.LOADING)
+    if (ReCaptchaLoader.getLoadingState() === ELoadingState.LOADING) {
+      // Check if the site key is equal to the current loading site key
+      if (siteKey !== ReCaptchaLoader.instanceSiteKey)
+        return Promise.reject('reCAPTCHA already loaded with different site key!')
+
       return new Promise<ReCaptchaInstance>((resolve, reject) => {
         ReCaptchaLoader.successfulLoadingConsumers.push((instance: ReCaptchaInstance) => resolve(instance))
         ReCaptchaLoader.errorLoadingRunnable.push((reason: any) => reject())
       })
+    }
 
+    // Set states
+    ReCaptchaLoader.instanceSiteKey = siteKey
     ReCaptchaLoader.setLoadingState(ELoadingState.LOADING)
 
     // Throw error if the recaptcha is already loaded
     const loader = new ReCaptchaLoader()
     return new Promise((resolve, reject) => {
-      loader.loadScript(siteKey).then(() => {
+      loader.loadScript(siteKey, options.useRecaptchaNet || false,
+        options.renderParameters || {}).then(() => {
         ReCaptchaLoader.setLoadingState(ELoadingState.LOADED)
 
         const instance = new ReCaptchaInstance(siteKey, grecaptcha)
         ReCaptchaLoader.successfulLoadingConsumers.forEach((v) => v(instance))
         ReCaptchaLoader.successfulLoadingConsumers = []
+
+        // Check for auto hide badge option
+        if (options.autoHideBadge || false)
+          instance.hideBadge()
+
+        ReCaptchaLoader.instance = instance
         resolve(instance)
       }).catch((error) => {
         ReCaptchaLoader.errorLoadingRunnable.forEach((v) => v(error))
@@ -50,7 +71,14 @@ class ReCaptchaLoader {
     })
   }
 
-  private static stateAttributeName = 'recaptcha-v3-state'
+  public static getInstance(): ReCaptchaInstance {
+    return ReCaptchaLoader.instance
+  }
+
+  private static loadingState: ELoadingState = null
+  private static instance: ReCaptchaInstance = null
+  private static instanceSiteKey: string = null
+
   private static successfulLoadingConsumers: Array<(instance: ReCaptchaInstance) => void> = []
   private static errorLoadingRunnable: Array<(reason: any) => void> = []
 
@@ -60,7 +88,7 @@ class ReCaptchaLoader {
    * @param state New loading state for the loading process.
    */
   private static setLoadingState(state: ELoadingState) {
-    document.documentElement.setAttribute(ReCaptchaLoader.stateAttributeName, state as any as string)
+    ReCaptchaLoader.loadingState = state
   }
 
   /**
@@ -68,30 +96,10 @@ class ReCaptchaLoader {
    * the NO_LOADED state is set as default.
    */
   private static getLoadingState(): ELoadingState {
-    const element = document.documentElement
-
-    if (element.hasAttribute(ReCaptchaLoader.stateAttributeName)) {
-      const val = parseInt(element.getAttribute(ReCaptchaLoader.stateAttributeName), 10)
-      if (isNaN(val))
-        return ELoadingState.NOT_LOADED
-      return val
-    } else
+    if (ReCaptchaLoader.loadingState === null)
       return ELoadingState.NOT_LOADED
-  }
-
-  /**
-   * Checks if the "<head>" element already contains an recaptcha script.
-   */
-  private static hasReCaptchaScript(): boolean {
-    const scripts = document.head.getElementsByTagName('script')
-
-    for (let i = 0; i < scripts.length; i++) {
-      const script = scripts[i]
-      if (script.hasAttribute('recaptcha-v3-script'))
-        return true
-    }
-
-    return false
+    else
+      return ReCaptchaLoader.loadingState
   }
 
   /**
@@ -100,12 +108,23 @@ class ReCaptchaLoader {
    * and append it to the "<head>" element.
    *
    * @param siteKey The site key to load the library with.
+   * @param useRecaptchaNet If the loader should use "recaptcha.net" instead of "google.com"
+   * @param renderParameters Additional parameters for reCAPTCHA.
    */
-  private loadScript(siteKey: string): Promise<HTMLScriptElement> {
+  private loadScript(siteKey: string, useRecaptchaNet: boolean = false,
+                     renderParameters: { [key: string]: string } = {}): Promise<HTMLScriptElement> {
     // Create script element
     const scriptElement: HTMLScriptElement = document.createElement('script')
     scriptElement.setAttribute('recaptcha-v3-script', '')
-    scriptElement.src = 'https://www.google.com/recaptcha/api.js?render=' + siteKey
+
+    let scriptBase = 'https://www.google.com/recaptcha/api.js'
+    if (useRecaptchaNet)
+      scriptBase = 'https://recaptcha.net/recaptcha/api.js'
+
+    // Build parameter query string
+    const parametersQuery = this.buildQueryString(renderParameters)
+
+    scriptElement.src = scriptBase + '?render=' + siteKey + parametersQuery
 
     return new Promise<HTMLScriptElement>((resolve, reject) => {
       scriptElement.addEventListener('load', this.waitForScriptToLoad(() => {
@@ -115,6 +134,26 @@ class ReCaptchaLoader {
         reject(new Error('Something went wrong while loading ReCaptcha. (' + error.toString() + ')'))
       }
       document.head.appendChild(scriptElement)
+    })
+  }
+
+  /**
+   * Will build a query string from the given parameters and return
+   * the built string. If parameters has no keys it will just return
+   * an empty string.
+   *
+   * @param parameters Object to build query string from.
+   */
+  private buildQueryString(parameters: { [key: string]: string }) {
+    const parameterKeys = Object.keys(parameters)
+
+    // If there are no parameters just return an empty string.
+    if (parameterKeys.length < 1)
+      return ''
+
+    // Build the actual query string (KEY=VALUE).
+    return '&' + Object.keys(parameters).map((parameterKey) => {
+      return parameterKey + '=' + parameters[parameterKey]
     })
   }
 
@@ -131,7 +170,7 @@ class ReCaptchaLoader {
       if ((window as any).grecaptcha === undefined)
         setTimeout(() => {
           this.waitForScriptToLoad(callback)
-        }, 100)
+        }, 25)
       else
         (window as any).grecaptcha.ready(() => {
           callback()
@@ -143,11 +182,43 @@ class ReCaptchaLoader {
 enum ELoadingState {
   NOT_LOADED,
   LOADING,
-  LOADED,
+  LOADED
 }
 
 /**
- * Only export the recaptcha load method directly to
+ * An interface for all available options for the
+ * reCAPTCHA loader.
+ */
+export interface IReCaptchaLoaderOptions {
+  /**
+   * By default the loader uses "google.com", with this
+   * option set to `true` it will use "recaptcha.net".
+   * (See: https://github.com/AurityLab/recaptcha-v3/pull/2)
+   */
+  useRecaptchaNet?: boolean,
+
+  /**
+   * Will automatically hide the badge after loading
+   * recaptcha. Warning: The usage of this option is only
+   * allowed if you follow the official guide for hiding
+   * the badge from Google:
+   * https://developers.google.com/recaptcha/docs/faq#id-like-to-hide-the-recaptcha-v3-badge-what-is-allowedl
+   */
+  autoHideBadge?: boolean,
+
+  /**
+   * Defines additional parameters for the rendering process.
+   * The parameters should be defined as key/value pair.
+   *
+   * Known possible parameters:
+   * `hl` -> Will set the language of the badge.
+   */
+  renderParameters?: { [key: string]: string }
+}
+
+/**
+ * Only export the recaptcha load and getInstance method to
  * avoid confusion with the class constructor.
  */
 export const load = ReCaptchaLoader.load
+export const getInstance = ReCaptchaLoader.getInstance

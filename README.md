@@ -1,10 +1,10 @@
 # reCAPTCHA-v3
 
-![npm](https://img.shields.io/npm/v/recaptcha-v3.svg) 
-![npm type definitions](https://img.shields.io/npm/types/recaptcha-v3.svg)
+[![npm](https://img.shields.io/npm/v/recaptcha-v3.svg)](https://www.npmjs.com/package/recaptcha-v3)
+[![npm type definitions](https://img.shields.io/npm/types/recaptcha-v3.svg)](https://www.npmjs.com/package/recaptcha-v3)
 
 
-A simple and easy to use reCAPTCHA (v3 only) library for the browser.
+A simple and easy to use reCAPTCHA (v3 only) library for the browser. (You may be also interested in [wrapper libraries](#wrapper-libraries))
 
 ## Install
 With NPM:
@@ -44,3 +44,31 @@ async function asyncFunction() {
   console.log(token) // Will also print the token
 }
 ```
+
+## Loader options
+The loader takes care of loading the reCAPTCHA script from Google.
+Therefore the loader offers optional options for additional configuration:
+
+|Name|Description|Type|Default value
+|----|-----------|----|-------------
+|**useRecaptchaNet**|Due to limitations in certain countries it's required to use `recaptcha.net` instead of `google.com`.|*boolean*|`false`
+|**autoHideBadge**|Will automatically hide the reCAPTCHA badge. Warning: The usage is only allowed if you follow the offical guide for hiding the badge from Google ([see here](https://developers.google.com/recaptcha/docs/faq#id-like-to-hide-the-recaptcha-v3-badge-what-is-allowed))|*boolean*|`false`
+|**renderParameters**|Will add the given parameters to the reCAPTCHA script. The given object will be converted into a query string and will then be added to the URL.|Object|`{}`
+
+### Usage
+To use the options just pass an additional object to the `load(...)` method.
+For example:
+```javascript
+import { load } from 'recaptcha-v3'
+
+load('<site key>', {
+  useRecaptchaNet: true,
+  autoHideBadge: true
+}).then((recaptcha) => {
+  
+})
+```
+
+## Wrapper libraries
+Wrapper libraries are available for:
+* Vue.js plugin ([vue-recaptcha-v3](https://github.com/AurityLab/vue-recaptcha-v3) / [npm](https://www.npmjs.com/package/vue-recaptcha-v3))
